@@ -1,4 +1,4 @@
-import { wrapFetchWithPayment, createSigner } from "x402-fetch";
+import { createSigner, wrapFetchWithPayment } from "x402-fetch";
 import { addLog } from "@/lib/store";
 
 interface TradingViewSignal {
@@ -7,6 +7,23 @@ interface TradingViewSignal {
   price: number;
   volume: number;
   exchange: string;
+}
+
+type PaymentFetch = (input: RequestInfo, init?: RequestInit) => Promise<Response>;
+
+let cachedFetch: PaymentFetch | null = null;
+
+async function getPaymentFetch(): Promise<PaymentFetch> {
+  if (cachedFetch) return cachedFetch;
+  const privateKey = process.env.PAYMENT_PRIVATE_KEY as `0x${string}`;
+  if (!privateKey) throw new Error("PAYMENT_PRIVATE_KEY not set");
+  const signer = await createSigner("base", privateKey);
+  cachedFetch = wrapFetchWithPayment(
+    globalThis.fetch,
+    signer,
+    BigInt(1_000_000)
+  );
+  return cachedFetch;
 }
 
 export async function POST(req: Request) {
@@ -23,46 +40,35 @@ export async function POST(req: Request) {
   };
 
   if (signal.action !== "BUY") {
-    const skippedLog = { ...logEntry, status: "skipped" };
-    addLog(skippedLog);
+    addLog({ ...logEntry, status: "skipped" });
     return Response.json({ status: "skipped", reason: "not a BUY signal" });
   }
 
   try {
     const results = await processSignal(signal);
-    const completedLog = {
+    addLog({
       ...logEntry,
       status: "completed",
       executed: results.executed,
       whale: results.whale,
       divergence: results.divergence,
       execution: results.execution,
-    };
-    addLog(completedLog);
+    });
     return Response.json({ status: "ok", results });
   } catch (error) {
-    const errorLog = { ...logEntry, status: "error" };
-    addLog(errorLog);
-    return Response.json(
-      { status: "error", message: String(error) },
-      { status: 500 }
-    );
+    addLog({ ...logEntry, status: "error" });
+    return Response.json({ status: "error", message: String(error) }, { status: 500 });
   }
 }
 
 async function processSignal(signal: TradingViewSignal) {
-  const privateKey = process.env.PAYMENT_PRIVATE_KEY as `0x${string}`;
-  const signer = await createSigner("base-mainnet", privateKey);
-  const fetchWithPayment = wrapFetchWithPayment(fetch, signer);
+  const fetchWithPayment = await getPaymentFetch();
 
-  const whaleRes = await fetchWithPayment(
-    "https://x402wid.vercel.app/api/decode",
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: signal.ticker, chain: "base" }),
-    }
-  );
+  const whaleRes = await fetchWithPayment("https://x402wid.vercel.app/api/decode", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: signal.ticker, chain: "base" }),
+  });
   const whale = await whaleRes.json();
 
   const divergenceRes = await fetchWithPayment(
@@ -81,18 +87,11 @@ async function processSignal(signal: TradingViewSignal) {
     divergence.divergenceScore >= 0.5;
 
   if (shouldExecute) {
-    const executeRes = await fetchWithPayment(
-      "https://x402smct.vercel.app/api/execute",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          token: signal.ticker,
-          chain: "base",
-          amountUsd: 10,
-        }),
-      }
-    );
+    const executeRes = await fetchWithPayment("https://x402smct.vercel.app/api/execute", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: signal.ticker, chain: "base", amountUsd: 10 }),
+    });
     const execution = await executeRes.json();
     return { whale, divergence, execution, executed: true };
   }
