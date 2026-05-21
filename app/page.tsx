@@ -1,6 +1,15 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
+
+const SolanaPaymentUI = dynamic(
+  () => import("@/components/SolanaPaymentUI"),
+  { ssr: false }
+);
+
+type Chain = "base" | "solana";
+type Asset = "usdc" | "jpyc";
 
 interface SignalLog {
   id: string;
@@ -10,6 +19,7 @@ interface SignalLog {
   price: number;
   status: string;
   executed: boolean;
+  chain?: "base" | "solana";
   whale?: {
     intent: string;
     confidence: number;
@@ -23,15 +33,24 @@ interface SignalLog {
   };
 }
 
+const CHAIN_PAYMENT_OPTIONS: Record<Chain, Asset[]> = {
+  base: ["usdc", "jpyc"],
+  solana: ["usdc"],
+};
+
 export default function Home() {
   const [logs, setLogs] = useState<SignalLog[]>([]);
   const [webhookUrl, setWebhookUrl] = useState("");
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [selectedChain, setSelectedChain] = useState<Chain>("base");
+  const [selectedAsset, setSelectedAsset] = useState<Asset>("usdc");
 
   useEffect(() => {
-    setWebhookUrl(`${window.location.origin}/api/webhook`);
-  }, []);
+    const path =
+      selectedChain === "solana" ? "/api/webhook/solana" : "/api/webhook";
+    setWebhookUrl(`${window.location.origin}${path}`);
+  }, [selectedChain]);
 
   const fetchLogs = useCallback(async () => {
     try {
@@ -58,6 +77,14 @@ export default function Home() {
       setTimeout(() => setCopied(false), 2000);
     } catch (e) {
       console.error("Failed to copy", e);
+    }
+  };
+
+  const handleChainChange = (chain: Chain) => {
+    setSelectedChain(chain);
+    const available = CHAIN_PAYMENT_OPTIONS[chain];
+    if (!available.includes(selectedAsset)) {
+      setSelectedAsset("usdc");
     }
   };
 
@@ -94,7 +121,7 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Webhook URL */}
+        {/* Chain + Payment Selector */}
         <div style={{
           background: "#111111",
           border: "1px solid #222",
@@ -102,10 +129,103 @@ export default function Home() {
           padding: "1.5rem",
           marginBottom: "2rem"
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.75rem" }}>
-            <span style={{ color: "#c8a96e", fontSize: "0.75rem", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase" }}>
-              Webhook URL
-            </span>
+          {/* Chain tabs */}
+          <div style={{ marginBottom: "1rem" }}>
+            <div style={{ color: "#c8a96e", fontSize: "0.75rem", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "0.75rem" }}>
+              Chain
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              {(["base", "solana"] as Chain[]).map((chain) => (
+                <button
+                  key={chain}
+                  onClick={() => handleChainChange(chain)}
+                  style={{
+                    background: selectedChain === chain ? "#1a1a2e" : "transparent",
+                    border: `1px solid ${selectedChain === chain ? (chain === "solana" ? "#9945FF" : "#c8a96e") : "#2a2a2a"}`,
+                    borderRadius: "8px",
+                    padding: "0.4rem 1rem",
+                    color: selectedChain === chain ? (chain === "solana" ? "#9945FF" : "#c8a96e") : "#555",
+                    cursor: "pointer",
+                    fontFamily: "'Outfit', sans-serif",
+                    fontSize: "0.8rem",
+                    fontWeight: 500,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    transition: "all 0.15s",
+                  }}
+                >
+                  {chain === "base" ? "Base (EVM)" : "Solana"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Asset tabs */}
+          <div style={{ marginBottom: "1rem" }}>
+            <div style={{ color: "#888", fontSize: "0.7rem", fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: "0.5rem" }}>
+              Payment Asset
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              {(["usdc", "jpyc"] as Asset[]).map((asset) => {
+                const isDisabled = !CHAIN_PAYMENT_OPTIONS[selectedChain].includes(asset);
+                return (
+                  <button
+                    key={asset}
+                    onClick={() => !isDisabled && setSelectedAsset(asset)}
+                    disabled={isDisabled}
+                    style={{
+                      background: selectedAsset === asset && !isDisabled ? "#1a2a1a" : "transparent",
+                      border: `1px solid ${isDisabled ? "#1e1e1e" : selectedAsset === asset ? "#4ade80" : "#2a2a2a"}`,
+                      borderRadius: "8px",
+                      padding: "0.35rem 0.9rem",
+                      color: isDisabled ? "#333" : selectedAsset === asset ? "#4ade80" : "#666",
+                      cursor: isDisabled ? "not-allowed" : "pointer",
+                      fontFamily: "'Outfit', sans-serif",
+                      fontSize: "0.8rem",
+                      fontWeight: 500,
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                      opacity: isDisabled ? 0.4 : 1,
+                      transition: "all 0.15s",
+                    }}
+                  >
+                    {asset.toUpperCase()}
+                    {isDisabled && <span style={{ marginLeft: "0.3rem", fontSize: "0.65rem" }}>—</span>}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Solana USDC-only banner */}
+          {selectedChain === "solana" && (
+            <div style={{
+              background: "#150e23",
+              border: "1px solid #9945FF33",
+              borderRadius: "8px",
+              padding: "0.6rem 0.9rem",
+              marginBottom: "1rem",
+              display: "flex",
+              alignItems: "center",
+              gap: "0.5rem",
+            }}>
+              <span style={{ color: "#9945FF", fontSize: "0.75rem" }}>◆</span>
+              <span style={{ color: "#9945FF", fontSize: "0.8rem" }}>
+                SolanaネットワークではUSDC決済のみご利用いただけます
+              </span>
+            </div>
+          )}
+
+          {/* Solana wallet connect */}
+          {selectedChain === "solana" && (
+            <div style={{ marginBottom: "1rem" }}>
+              <SolanaPaymentUI />
+            </div>
+          )}
+
+          {/* Webhook URL */}
+          <div style={{ color: "#c8a96e", fontSize: "0.75rem", fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "0.5rem" }}>
+            Webhook URL
           </div>
           <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
             <div style={{
@@ -143,7 +263,9 @@ export default function Home() {
             </button>
           </div>
           <p style={{ color: "#555", fontSize: "0.8rem", marginTop: "0.75rem" }}>
-            このURLをTradingViewのアラート設定 → Webhook URLに設定してください
+            {selectedChain === "solana"
+              ? "x402-fetch対応クライアントからSolana USDCで決済してWebhookを呼び出してください"
+              : "このURLをTradingViewのアラート設定 → Webhook URLに設定してください"}
           </p>
         </div>
 
@@ -225,19 +347,35 @@ export default function Home() {
                 }}>
                   {/* Left: action badge + ticker */}
                   <div>
-                    <span style={{
-                      display: "inline-block",
-                      background: log.action === "BUY" ? "#1a3a1a" : "#3a1a1a",
-                      color: log.action === "BUY" ? "#4ade80" : "#f87171",
-                      fontSize: "0.7rem",
-                      fontWeight: 700,
-                      padding: "0.2rem 0.5rem",
-                      borderRadius: "4px",
-                      letterSpacing: "0.05em",
-                      marginBottom: "0.25rem"
-                    }}>
-                      {log.action}
-                    </span>
+                    <div style={{ display: "flex", gap: "0.3rem", marginBottom: "0.25rem", flexWrap: "wrap" }}>
+                      <span style={{
+                        display: "inline-block",
+                        background: log.action === "BUY" ? "#1a3a1a" : "#3a1a1a",
+                        color: log.action === "BUY" ? "#4ade80" : "#f87171",
+                        fontSize: "0.7rem",
+                        fontWeight: 700,
+                        padding: "0.2rem 0.5rem",
+                        borderRadius: "4px",
+                        letterSpacing: "0.05em",
+                      }}>
+                        {log.action}
+                      </span>
+                      {log.chain === "solana" && (
+                        <span style={{
+                          display: "inline-block",
+                          background: "#150e23",
+                          color: "#9945FF",
+                          fontSize: "0.65rem",
+                          fontWeight: 600,
+                          padding: "0.2rem 0.5rem",
+                          borderRadius: "4px",
+                          letterSpacing: "0.05em",
+                          border: "1px solid #9945FF33",
+                        }}>
+                          SOL
+                        </span>
+                      )}
+                    </div>
                     <div style={{ color: "#ffffff", fontSize: "0.95rem", fontWeight: 600 }}>{log.ticker}</div>
                     <div style={{ color: "#555", fontSize: "0.75rem" }}>${log.price?.toLocaleString()}</div>
                   </div>

@@ -6,6 +6,7 @@ export interface SignalLog {
   price: number;
   status: string;
   executed: boolean;
+  chain?: "base" | "solana";
   whale?: {
     intent: string;
     confidence: number;
